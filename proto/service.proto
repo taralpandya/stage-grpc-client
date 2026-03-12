@@ -1,0 +1,158 @@
+syntax = "proto3";
+
+package phlserv;
+
+// ── Enums ─────────────────────────────────────────────────────────────────────
+
+enum AckStatus {
+  OK      = 0;
+  PARTIAL = 1;
+  RETRY   = 2;
+}
+
+// NEW
+enum RowOperation {
+  INSERT = 0;
+  UPDATE = 1;
+  DELETE = 2;
+}
+
+// ── Shared Types ──────────────────────────────────────────────────────────────
+
+message Record {
+  string record_id  = 1;
+  string type       = 2;
+  bytes  payload    = 3;
+  int64  created_at = 4;
+}
+
+// NEW — a single database row, generic key/value columns
+message DbRow {
+  string              table_name  = 1;
+  map<string, string> columns     = 2;
+  string              primary_key = 3;
+  RowOperation        operation   = 4;
+}
+
+// NEW — sync metadata per table, sent alongside each batch
+message TableSync {
+  string table_name     = 1;
+  string last_record_id = 2;
+  int64  last_timestamp = 3;
+  int64  row_count      = 4;
+}
+
+// NEW — a paginated batch of database rows from one table
+message DbSyncBatch {
+  string        batch_id   = 1;
+  string        client_id  = 2;
+  repeated DbRow rows      = 3;
+  TableSync     sync_meta  = 4;
+  int64         timestamp  = 5;
+}
+
+// NEW — sync config for one table, sent from server to client on handshake
+message TableSyncConfig {
+  string table_name     = 1;
+  int32  interval_secs  = 2;
+  bool   enabled        = 3;
+  string last_synced_at = 4;  // ISO 8601 timestamp, empty if never synced
+  string last_record_id = 5;  // last PK synced, empty if never synced
+}
+
+// NEW — describes a single column from MySQL DESCRIBE output
+message ColumnSchema {
+  string column_name = 1;
+  string mysql_type  = 2;  // raw MySQL type e.g. "bigint(20)", "varchar(100)"
+  bool   nullable    = 3;
+  string default_val = 4;
+}
+
+// NEW — describes a full table schema
+message TableSchema {
+  string                table_name = 1;
+  repeated ColumnSchema columns    = 2;
+}
+
+// ── Client → Server messages ──────────────────────────────────────────────────
+
+message Handshake {
+  string               client_id           = 1;
+  string               subscription_id     = 2;
+  string               last_record_id      = 3;
+  string               machine_fingerprint = 4;
+  repeated TableSchema schemas             = 5;  // ← new
+}
+
+message DataBatch {
+  string          batch_id  = 1;
+  repeated Record records   = 2;
+  int64           timestamp = 3;
+}
+
+message FetchResponse {
+  string          request_id = 1;
+  repeated Record records    = 2;
+}
+
+message ClientMessage {
+  oneof payload {
+    Handshake     handshake      = 1;
+    DataBatch     data_batch     = 2;
+    FetchResponse fetch_response = 3;
+    DbSyncBatch   db_sync_batch  = 4;  // NEW
+  }
+}
+
+// ── Server → Client messages ──────────────────────────────────────────────────
+
+message HandshakeAck {
+  string                   last_record_id = 1;
+  string                   session_id     = 2;
+  repeated TableSyncConfig sync_config    = 3;  // NEW — table sync config per client
+}
+
+message Ack {
+  string    batch_id       = 1;
+  string    last_record_id = 2;
+  AckStatus status         = 3;
+}
+
+// NEW — ACK specifically for a db sync batch
+message DbSyncAck {
+  string    batch_id       = 1;
+  string    table_name     = 2;
+  string    last_record_id = 3;
+  int64     row_count      = 4;
+  AckStatus status         = 5;
+}
+
+message FetchRequest {
+  string          request_id   = 1;
+  repeated string record_ids   = 2;
+  bool            force_resend = 3;
+}
+
+message ServerMessage {
+  oneof payload {
+    HandshakeAck  handshake_ack = 1;
+    Ack           ack           = 2;
+    FetchRequest  fetch_request = 3;
+    DbSyncAck     db_sync_ack   = 4;  // NEW
+  }
+}
+
+// ── Service ───────────────────────────────────────────────────────────────────
+
+service DataService {
+  rpc DataStream  (stream ClientMessage) returns (stream ServerMessage);
+  rpc HealthCheck (HealthCheckRequest)   returns (HealthCheckResponse);
+}
+
+// ── Health Check ──────────────────────────────────────────────────────────────
+
+message HealthCheckRequest  {}
+message HealthCheckResponse {
+  string status    = 1;
+  int64  timestamp = 2;
+}

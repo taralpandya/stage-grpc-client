@@ -1,0 +1,19 @@
+# Certs — never commit these
+certs/
+
+# Generated proto files
+*_pb2.py
+*_pb2_grpc.py
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# PyInstaller
+dist/
+build/
+*.spec.bak
+
+# Logs
+*.log
