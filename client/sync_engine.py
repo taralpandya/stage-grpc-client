@@ -198,7 +198,15 @@ class SyncEngine:
         pages = await loop.run_in_executor(None, get_pages)
 
         if not pages:
-            logger.debug(f"No changes found for {table_name}")
+            logger.debug(f"No changes found for {table_name} — sending heartbeat")
+            heartbeat = SyncBatch(
+                table_name = table_name,
+                rows       = [],
+                page_num   = 1,
+                is_last    = True,
+                sync_state = state,
+            )
+            await self._on_batch_ready(heartbeat)
             state.last_synced_at = sync_start
             if self._on_sync_complete:
                 self._on_sync_complete()

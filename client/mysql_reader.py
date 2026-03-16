@@ -135,6 +135,11 @@ class MySQLReader:
         excluded = EXCLUDED_COLUMNS.get(table_name, set())
         offset   = 0
 
+        # OpenDental stores DateTStamp as naive local time.
+        # Convert any timezone-aware since to naive local time before querying.
+        if since is not None and since.tzinfo is not None:
+            since = since.astimezone().replace(tzinfo=None)
+
         logger.info(
             f"Starting paginated sync on {table_name} — "
             f"{'full' if since is None else 'delta since ' + since.isoformat()} "
